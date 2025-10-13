@@ -1,0 +1,7 @@
+{% layout none %}
+{
+  "id": {{ product.id | json }},
+  "handle": {{ product.handle | json }},
+  "rating": {{ product.metafields.custom.rating.value.rating | default: 0 | json }},
+  "scale":  {{ product.metafields.custom.rating.value.scale_max | default: 5 | json }}
+}

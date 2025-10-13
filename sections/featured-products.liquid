@@ -1,0 +1,375 @@
+{{  'section-featured-products.css' | asset_url | stylesheet_tag }}
+
+<section id="fp-{{ section.id }}" class="fp color-{{ section.settings.color_scheme }}"
+style="
+    --fp-pt-m: {{ section.settings.pad_top_m   | default: 32 }}px;
+    --fp-pb-m: {{ section.settings.pad_bottom_m| default: 32 }}px;
+    --fp-pt-d: {{ section.settings.pad_top_d   | default: 64 }}px;
+    --fp-pb-d: {{ section.settings.pad_bottom_d| default: 64 }}px;
+  ">
+  <div class="fp__inner">
+    {% if section.settings.title != blank %}
+      <h2 class="fp__title">{{ section.settings.title }}</h2>
+    {% endif %}
+    
+   <div class="fp__toolbar" data-fp-toolbar>
+      <button class="fp__arrow fp__arrow--prev" type="button" aria-label="Previous" aria-disabled="true">
+        <img src="{{ 'arrow-left.svg' | asset_url }}" alt="" width="44" height="44" />
+      </button>
+      <button class="fp__arrow fp__arrow--next" type="button" aria-label="Next" aria-disabled="false">
+        <img src="{{ 'arrow-right.svg' | asset_url }}" alt="" width="44" height="44" />
+      </button>
+    </div>
+
+    {% if section.settings.text != blank %}
+      <p class="fp__text">{{ section.settings.text }}</p>
+    {% endif %}
+
+
+    <div class="fp__track" data-fp-track>
+
+    </div>
+  </div>
+</section>
+
+ 
+
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    const root = document.getElementById('fp-{{ section.id }}');
+    const track = root.querySelector('[data-fp-track]');
+    const btnPrev = root.querySelector('.fp__arrow--prev');
+    const btnNext = root.querySelector('.fp__arrow--next');
+
+    const fallbackProducts = [{% for p in section.blocks %}{% if p.type == 'fallback_product' and p.settings.product != blank %}
+      {
+        id: {{ p.settings.product.id }},
+        title: {{ p.settings.product.title | json }},
+        url: {{ p.settings.product.url | json }},
+        image: {{ p.settings.product.featured_image | image_url: width: 600 | json }},
+        price: {{ p.settings.product.price | json }},
+        compare_at_price: {{ p.settings.product.compare_at_price | json }},
+        description: {{ p.settings.product.description | strip_html | json }},
+        handle: {{ p.settings.product.handle | json }},
+        rating: {{ p.settings.product.metafields.custom.rating.value | default: 0 | json }}
+      }{% unless forloop.last %},{% endunless %}
+    {% endif %}{% endfor %}];
+
+
+    const money = cents => {
+      try { return new Intl.NumberFormat({{ request.locale.iso_code | json }}, { style: 'currency', currency: {{ shop.currency | json }} }).format(cents/100); }
+      catch(e){ return (cents/100).toFixed(2) + ' {{ shop.currency }}' }
+    };
+    const cleanHTML = (html) => (html || '').replace(/<[^>]*>/g, '').trim();
+    const firstLine = (t) => (t || '').split(/\r?\n/)[0].trim();
+
+    const moneyRound = (cents) => {
+      const units = Math.round((cents || 0) / 100);
+      try {
+        return new Intl.NumberFormat({{ request.locale.iso_code | json }}, {
+          style: 'currency',
+          currency: {{ shop.currency | json }},
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 0
+        }).format(units);
+      } catch(e){
+        return units + ' {{ shop.currency }}';
+      }
+    };
+    const STAR_PATH = "M1.9458 8.61398C1.68476 8.37257 1.82656 7.93616 2.17964 7.8943L7.18262 7.30089C7.32652 7.28383 7.45151 7.19346 7.51221 7.06187L9.6224 2.48705C9.77132 2.16419 10.2303 2.16413 10.3792 2.48699L12.4894 7.06178C12.5501 7.19336 12.6743 7.28397 12.8182 7.30104L17.8215 7.8943C18.1745 7.93616 18.3159 8.3727 18.0549 8.61411L14.3565 12.0349C14.2501 12.1333 14.2027 12.2798 14.231 12.4219L15.2125 17.3633C15.2818 17.712 14.9107 17.9822 14.6004 17.8086L10.2043 15.3472C10.0778 15.2764 9.92422 15.2767 9.79777 15.3475L5.4012 17.8079C5.09094 17.9816 4.71912 17.712 4.78841 17.3633L5.77012 12.4222C5.79836 12.2801 5.75111 12.1333 5.64472 12.0349L1.9458 8.61398Z";
+    const STAR_BASE = `<svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path d="${STAR_PATH}"/></svg>`;
+    const STAR_FILL = STAR_BASE; 
+
+    function starsElHTML(){
+      let s = '<div class="fp-stars" aria-hidden="true">';
+      for (let i=0;i<5;i++){
+        s += `<span class="fp-star">
+                <span class="fp-star__base">${STAR_BASE}</span>
+                <span class="fp-star__fill" style="width:0%">${STAR_FILL}</span>
+              </span>`;
+      }
+      s += '</div>';
+      return s;
+    }
+
+    function renderRating(el, val){
+      const v = Math.max(0, Math.min(5, Number(val)||0));
+      const fills = el.querySelectorAll('.fp-star .fp-star__fill');
+      fills.forEach((fill, i) => {
+    
+        const part = Math.max(0, Math.min(1, v - i));
+        fill.style.width = (part*100)+'%';
+      });
+      const starsWrap = el.querySelector('.fp-stars');
+      if (starsWrap) starsWrap.setAttribute('aria-label', `${v} out of 5`);
+      el.querySelector('.fp-rating__num').textContent = v.toFixed(1).replace('.0',''); 
+    }
+    async function fetchRating(handle){
+      try{
+        const r=await fetch(`/products/${handle}?view=rating`,{credentials:'same-origin'});
+        if(!r.ok) return null; return await r.json();
+      }catch(e){ return null; }
+    }
+
+   
+    async function hydrateRatings(list){
+      for(const p of list){
+        if(!p.handle) continue;
+        const data=await fetchRating(p.handle);
+        console.log('[rating]', p.handle, '->', data);
+        const el=track.querySelector(`.fp-rating[data-h="${p.handle}"]`);
+        if(data && el) renderRating(el,data.rating);
+      }
+    }
+
+
+    function cardHTML(p){
+      const onSale = (p.compare_at_price && p.compare_at_price > p.price);
+      const img = p.image || (p.featured_image && p.featured_image.url) || null;
+      return `
+        <article class="fp-card">
+          <div class="fp-card__media" style="position:relative">
+            ${onSale ? `<span class="fp-badge">Save ${moneyRound(p.compare_at_price - p.price)}</span>` : ``}
+            ${img ? `<img src="${img}" alt="">` : `<span>no image</span>`}
+          </div>
+          <div class="fp-rating" data-h="${p.handle || ''}">
+            ${starsElHTML(0)}
+            <span class="fp-rating__num">0</span>
+          </div>
+          <a class="fp-card__title" href="${p.url || p.online_store_url || '#'}">${p.title}</a>
+          ${p.description ? `<p class="fp-card__desc">${p.description}</p>` : ``}
+          <div class="fp-price">
+            ${onSale ? `<span class="fp-price__old">${money(p.compare_at_price)}</span>` : ``}
+            <span class="fp-price__new">${money(p.price)}</span>
+          </div>
+        </article>`;
+    }
+
+    function render(list){
+      try {
+        track.innerHTML = list.map(cardHTML).join('');
+        updateArrows();
+      } catch(e){
+        console.error('FP render error:', e);
+        track.innerHTML = '<p>No products to show.</p>';
+      }
+    }
+
+
+    const toolbar = root.querySelector('[data-fp-toolbar]');
+
+    function canScrollPrev() {
+      return track.scrollLeft > 0;
+    }
+    function canScrollNext() {      
+      return track.scrollLeft + track.clientWidth < track.scrollWidth - 1;
+    }
+
+    function setArrowState(btn, enabled) {
+      btn.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+    }
+
+    function updateArrows(){
+      const isDesktop = window.matchMedia('(min-width:750px)').matches;
+      const needsArrows = track.scrollWidth > track.clientWidth + 2;
+
+      
+      toolbar.style.display = (isDesktop && needsArrows) ? 'flex' : 'none';
+      toolbar.setAttribute('aria-hidden', (isDesktop && needsArrows) ? 'false' : 'true');
+
+
+      btnPrev.setAttribute('aria-disabled', track.scrollLeft <= 2 ? 'true' : 'false');
+      btnNext.setAttribute('aria-disabled', (track.scrollLeft + track.clientWidth >= track.scrollWidth - 2) ? 'true' : 'false');
+    }
+
+
+    function getGapPx(){
+        const cs = getComputedStyle(track);
+        const g = cs.columnGap || cs.gap || '0px';
+        return parseFloat(g) || 0;
+      }
+
+      function cardStep(){
+        const card = track.querySelector('.fp-card');
+        const gap = getGapPx();
+        return (card ? card.getBoundingClientRect().width : track.clientWidth) + gap;
+      }
+
+    function scrollByCard(dir){
+      if ((dir < 0 && btnPrev.getAttribute('aria-disabled') === 'true') ||
+          (dir > 0 && btnNext.getAttribute('aria-disabled') === 'true')) return;
+
+      track.scrollBy({ left: dir * cardStep(), behavior: 'smooth' });
+      setTimeout(updateArrows, 220);
+    }
+
+    btnPrev.addEventListener('click', ()=>scrollByCard(-1));
+    btnNext.addEventListener('click', ()=>scrollByCard(1));
+    track.addEventListener('scroll', updateArrows);
+    window.addEventListener('resize', updateArrows);
+
+    async function loadRecommendations(){
+      const limit = {{ section.settings.limit | default: 4 }};
+      {% if template.name == 'product' and product %}
+        const url = `/recommendations/products.json?product_id={{ product.id }}&limit=${limit}`;
+        try{
+          const r = await fetch(url, { credentials: 'same-origin' });
+          if(!r.ok) throw new Error('bad status');
+          const data = await r.json();
+          if(data && data.products && data.products.length){
+
+            const list = data.products.map((p) => {
+         
+            const img =
+              (p.featured_image &&
+                (typeof p.featured_image === 'string'
+                  ? p.featured_image
+                  : (p.featured_image.url || p.featured_image.src))) ||
+              (p.images && p.images.length
+                ? (p.images[0].url || p.images[0].src)
+                : null);
+
+            
+            const price = (p.variants && p.variants[0] && p.variants[0].price) || p.price || 0;
+            const compare =
+              (p.variants && p.variants[0] && p.variants[0].compare_at_price) ||
+              p.compare_at_price || null;
+
+          
+            const url = p.url ? p.url : (p.handle ? `/products/${p.handle}` : '#');
+
+            return {
+              id: p.id,
+              title: p.title,
+              url,
+              image: img,
+              price,
+              compare_at_price: compare,
+              description: firstLine(cleanHTML(p.body_html || p.description)),
+              handle: p.handle || (p.url ? p.url.replace('/products/','').replace(/\/.*$/,'') : null)
+            };
+          });
+
+            render(list);
+            updateArrows();
+            hydrateRatings(list);
+            return;
+          }
+        }catch(e){}
+      {% endif %}
+
+     {% if section.settings.use_fallback and section.blocks.size > 0 %}
+       if (fallbackProducts.length){
+          render(fallbackProducts);
+          fallbackProducts.forEach(fp => {
+            const el = track.querySelector(`.fp-rating[data-h="${fp.handle}"]`);
+            if (el) renderRating(el, fp.rating || 0);
+          });
+          return;
+        }
+
+      {% endif %}
+
+      track.innerHTML = '<p>No products to show.</p>';
+    }
+
+    loadRecommendations();
+  });
+  </script>
+
+  {% schema %}
+  {
+    "name": "Featured products",
+    "settings": [
+      { 
+        "type": "text", 
+        "id": "title", 
+        "label": "Title", 
+        "default": "Featured products" 
+    },
+      { 
+        "type": "textarea", 
+        "id": "text", 
+        "label": "Description", 
+        "default": "Lorem ipsum..." 
+    },
+      { 
+        "type": "range", 
+        "id": "limit", 
+        "label": "Products limit", 
+        "min": 1, 
+        "max": 8, 
+        "step": 1, 
+        "default": 4 
+      },
+      { 
+        "type": "checkbox", 
+        "id": "use_fallback", 
+        "label": "Use fallback products if recommendations are empty", "default": true 
+      },
+      { 
+        "type": "color_scheme", 
+        "id": "color_scheme", 
+        "label": "Color scheme", 
+        "default": "background-1" 
+      },
+      { 
+        "type": "range", 
+        "id": "pad_top_m",    
+        "label": "Padding top (mobile)",    
+        "min": 0, 
+        "max": 160, 
+        "step": 4, 
+        "default": 32 
+      },
+      { 
+        "type": "range", 
+        "id": "pad_bottom_m", 
+        "label": "Padding bottom (mobile)", 
+        "min": 0, 
+        "max": 160, 
+        "step": 4, 
+        "default": 32 
+      },
+      { 
+        "type": "range", 
+        "id": "pad_top_d",    
+        "label": "Padding top (desktop)",   
+        "min": 0, 
+        "max": 240, 
+        "step": 4, 
+        "default": 64 
+      },
+      { 
+        "type": "range", 
+        "id": "pad_bottom_d", 
+        "label": "Padding bottom (desktop)",
+        "min": 0, 
+        "max": 240, 
+        "step": 4, 
+        "default": 64 
+      }
+
+    ],
+    "blocks": [
+      {
+        "type": "fallback_product",
+        "name": "Fallback product",
+        "settings": [
+            { 
+                "type": "product", 
+                "id": "product", 
+                "label": "Product" 
+            }
+        ]
+      }
+    ],
+    "max_blocks": 8,
+    "presets": [
+        { 
+            "name": "Featured products" 
+        }
+    ]
+  }
+  {% endschema %}
+
